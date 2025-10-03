@@ -1,0 +1,113 @@
+Description: CloudShirt instances
+
+# --- Parameters ---
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: vockey
+
+
+
+Resources:
+
+  # --- Instances ---
+
+  instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0e95a5e2743ec9ec9
+      InstanceType: t3.small
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !ImportValue securityGroupInstance1Id
+      SubnetId: !ImportValue publicSubnet1Id
+      UserData:
+        Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              # --- Update OS en dependencies ---
+              yum update -y
+
+              # --- Installeer Git en .NET 6 SDK ---
+              rpm -Uvh https://packages.microsoft.com/config/centos/8/packages-microsoft-prod.rpm # TESTEN OF DEZE REPO WERKT, ANDERS https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rp
+              yum install -y dotnet-sdk-6.0 git
+
+              # --- Clone CloudShirt naar de juiste map ---
+              cd /home/ec2-user/
+              git clone https://github.com/looking4ward/CloudShirt.git .
+
+              # --- Pas appsettings.json aan met RDS endpoint ---
+              sed -i 's/Server.*CatalogDb;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
+              sed -i 's/Server.*Identity;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
+
+              # --- Build & publish .NET Web app ---
+              cd /home/ec2-user/CloudShirt/src/Web
+              dotnet publish -c Release -o /home/ec2-user/CloudShirt/release
+
+              # --- Start de webapp met nohup ---
+              cd /home/ec2-user/CloudShirt/release
+              nohup dotnet Web.dll > web.log 2>&1 &
+            - RDSENDPOINT: !ImportValue rdsEndpointAddress
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-instances
+        - Key: Name
+          Value: instance1
+
+  instance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0e95a5e2743ec9ec9
+      InstanceType: t3.small
+      KeyName: !Ref KeyName
+      SecurityGroupIds:
+        - !ImportValue securityGroupInstance1Id
+      SubnetId: !ImportValue publicSubnet2Id
+      UserData:
+        Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              # --- Update OS en dependencies ---
+              yum update -y
+
+              # --- Installeer Git en .NET 5 SDK ---
+              rpm -Uvh https://packages.microsoft.com/config/centos/8/packages-microsoft-prod.rpm # TESTEN OF DEZE REPO WERKT, ANDERS https://packages.microsoft.com/config/centos/7/packages-microsoft-prod.rpm
+              yum install -y dotnet-sdk-6.0 git
+
+              # --- Clone CloudShirt naar de juiste map ---
+              cd /home/ec2-user/
+              git clone https://github.com/looking4ward/CloudShirt.git .
+
+              # --- Pas appsettings.json aan met RDS endpoint ---
+              sed -i 's/Server.*CatalogDb;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
+              sed -i 's/Server.*Identity;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
+
+              # --- Build & publish .NET Web app ---
+              cd /home/ec2-user/CloudShirt/src/Web
+              dotnet publish -c Release -o /home/ec2-user/CloudShirt/release
+
+              # --- Start de webapp met nohup ---
+              cd /home/ec2-user/CloudShirt/release
+              nohup dotnet Web.dll > web.log 2>&1 &
+            - RDSENDPOINT: !ImportValue rdsEndpointAddress
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-instances
+        - Key: Name
+          Value: instance2
+
+
+# --- Outputs ---
+
+Outputs:
+  Instance1Id:
+    Value: !Ref instance1
+    Export:
+      Name: intance1Id
+  
+  instance2Id:
+    Value: !Ref instance2
+    Export:
+      Name: instance2Id

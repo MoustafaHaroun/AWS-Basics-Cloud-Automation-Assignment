@@ -1,0 +1,96 @@
+Description: CloudShirt Database + Security Groups
+
+Resources:
+
+# --- Security Groups ---
+
+  securityGroupInstance1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all outbound + inbound 5099, 44315 
+      VpcId: !ImportValue vpc1Id
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5099
+          ToPort: 5099
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 44315
+          ToPort: 44315
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-db
+        - Key: Name
+          Value: securityGroupInstance1
+
+
+  securityGroupRds1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all outbound + inbound 1433
+      VpcId: !ImportValue vpc1Id
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          SourceSecurityGroupId: !Ref securityGroupInstance1
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-db
+        - Key: Name
+          Value: securityGroupRds1
+
+    # --- RDS Database ---
+
+  rdsSubnetGroup1:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet for CloudShirt RDS
+      SubnetIds:
+        - !ImportValue privateSubnet1Id
+        - !ImportValue privateSubnet2Id
+      DBSubnetGroupName: rdsSubnetGroup1
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-db
+        - Key: Name
+          Value: rdsSubnetGroup1
+
+  rds1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: db1
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.small
+      Engine: sqlserver-ex
+      MasterUsername: csadmin
+      MasterUserPassword: cspasswd
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref securityGroupRds1
+      DBSubnetGroupName: !Ref rdsSubnetGroup1
+      MonitoringInterval: 0
+      LicenseModel: license-included
+      Tags:
+        - Key: Stack 
+          Value: cloudshirt-db
+        - Key: Name
+          Value: rds1
+
+# --- Outputs ---
+
+Outputs:
+  securityGroupInstance1:
+    Value: !Ref securityGroupInstance1
+    Export: 
+      Name: securityGroupInstance1Id
+ 
+  rdsEndpoint:
+    Value: !GetAtt rds1.Endpoint.Address
+    Export:
+      Name: rdsEndpointAddress
