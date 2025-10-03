@@ -49,8 +49,8 @@ Resources:
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
       Tags:
-       - Key: stack
-         Value: vpc
+       - Key: Stack
+         Value: aws-vpc
        - Key: name 
          Value: vpc1
 
@@ -58,8 +58,8 @@ Resources:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
-      - Key: stack 
-        Value: vpc 
+      - Key: Stack 
+        Value: aws-vpc 
       - Key: name
         Value: internetGateway1 
 
@@ -68,46 +68,79 @@ Resources:
     Properties:
       InternetGatewayId: !Ref internetGateway1
       VpcId: !Ref vpc1
-      Tags:
-      - Key: stack
-        Value: vpc 
-      - Key: name
-        Value: gatewayAttachment1
 
 
 # --- Public Routing ---
 
   publicRouteTable1:
-    Type: AWS:EC2:RouteTable
+    Type: AWS::EC2::RouteTable
     Properties:
-    VpcId: !Ref vpc1
+      VpcId: !Ref vpc1
 
   publicRoute1:    
-    Type: AWS::EC2:Route
+    Type: AWS::EC2::Route
     Properties:
-      RouteTableID: !Ref publicRouteTable1
+      RouteTableId: !Ref publicRouteTable1
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref internetGateway1
 
   publicSubnet1RouteTableAssociation1:
-    Type: AWS:EC2:SubnetRouteTableAssociation
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref publicRouteTable1
       SubnetId: !Ref publicSubnet1
       
   publicSubnet2RouteTableAssociation1:
-    Type: AWS:EC2:SubnetRouteTableAssociation
+    Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref publicRouteTable1
       SubnetId: !Ref publicSubnet2
 
 
-# -- Private Routing --
+# --- NAT Gateways ---
+
+  eip1:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  natGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+        AllocationId: !GetAtt eip1.AllocationId
+        SubnetId: !Ref publicSubnet1
+        Tags:
+        - Key: Stack
+          Value: aws-vpc
+        - Key: Name
+          Value: natGateway1
+
+  eip2:
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  natGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+        AllocationId: !GetAtt eip2.AllocationId
+        SubnetId: !Ref publicSubnet2
+        Tags:
+        - Key: Stack
+          Value: aws-vpc
+        - Key: Name
+          Value: natGateway2
+
+
+# --- Private Routing ---
+
   privateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref vpc1
       Tags:
+        - Key: Stack 
+          Value: aws-vpc 
         - Key: Name
           Value: privateRouteTable1
 
@@ -118,7 +151,7 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref natGateway1
 
-  privateSubnet1RouteTableAssociation:
+  privateSubnet1RouteTableAssociation1:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref privateRouteTable1
@@ -129,8 +162,10 @@ Resources:
     Properties:
       VpcId: !Ref vpc1
       Tags:
+        - Key: Stack 
+          Value: aws-vpc 
         - Key: Name
-          Value: Private-RT-AZ2
+          Value: privateRouteTable2 
 
   privateRoute2:
     Type: AWS::EC2::Route
@@ -139,12 +174,11 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref natGateway2
 
-  privateSubnet2RouteTableAssociation:
+  privateSubnet2RouteTableAssociation2:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       RouteTableId: !Ref privateRouteTable2
       SubnetId: !Ref privateSubnet2
-
 
 
 # --- Subnets ---
@@ -156,9 +190,9 @@ Resources:
       VpcId: !Ref vpc1
       CidrBlock: !Ref publicSubnet1Cidr
       Tags:
-        - Key: stack 
-          Value: vpc 
-        - Key: name 
+        - Key: Stack 
+          Value: aws-vpc 
+        - Key: Name 
           Value: publicSubnet1  
   
   privateSubnet1:
@@ -168,9 +202,9 @@ Resources:
       VpcId: !Ref vpc1
       CidrBlock: !Ref privateSubnet1Cidr
       Tags:
-        - Key: stack 
-          Value: vpc 
-        - Key: name 
+        - Key: Stack 
+          Value: aws-vpc 
+        - Key: Name 
           Value: privateSubnet1  
   
   publicSubnet2:
@@ -180,9 +214,9 @@ Resources:
       VpcId: !Ref vpc1
       CidrBlock: !Ref publicSubnet2Cidr
       Tags:
-        - Key: stack 
-          Value: vpc 
-        - Key: name 
+        - Key: Stack 
+          Value: aws-vpc 
+        - Key: Name 
           Value: publicSubnet2  
 
   privateSubnet2:
@@ -192,7 +226,51 @@ Resources:
       VpcId: !Ref vpc1
       CidrBlock: !Ref privateSubnet2Cidr
       Tags:
-        - Key: stack 
-          Value: vpc 
-        - Key: name 
-          Value: privateSubnet2  
+        - Key: Stack 
+          Value: aws-vpc 
+        - Key: Name 
+          Value: privateSubnet2
+
+
+# --- Outputs ---
+
+Outputs:
+  vpc1Id:
+    Value: !Ref vpc1
+    Export:
+      Name: vpc1Id
+  
+  publicSubnet1Id:
+    Value: !Ref publicSubnet1
+    Export:
+      Name: publicSubnet1Id
+
+  publicSubnet2Id:
+    Value: !Ref publicSubnet2
+    Export:
+      Name: publicSubnet2Id
+  
+  privateSubnet1Id:
+    Value: !Ref privateSubnet1
+    Export:
+      Name: privateSubnet1Id
+
+  privateSubnet2Id:
+    Value: !Ref privateSubnet2
+    Export:
+      Name: privateSubnet2Id
+
+  internetGatewayId:
+    Value: !Ref internetGateway1
+    Export:
+      Name: internetGatewayId
+
+  natGateway1Id:
+    Value: !Ref natGateway1
+    Export:
+      Name: natGateway1Id
+
+  natGateway2Id:
+    Value: !Ref natGateway2
+    Export:
+      Name: natGateway2Id
