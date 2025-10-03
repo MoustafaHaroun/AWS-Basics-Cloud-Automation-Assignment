@@ -59,7 +59,7 @@ Resources:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceIdentifier: db1
-      AllocatedStorage: 10
+      AllocatedStorage: 20
       DBInstanceClass: db.t3.small
       Engine: sqlserver-ex
       MasterUsername: csadmin
