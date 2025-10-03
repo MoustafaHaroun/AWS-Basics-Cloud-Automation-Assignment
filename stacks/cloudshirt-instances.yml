@@ -32,6 +32,7 @@ Resources:
             yum install -y dotnet-sdk-6.0 git
 
             # --- Clone CloudShirt naar de juiste map ---
+            cd /home/ec2-user/
             mkdir -p CloudShirt
             cd /home/ec2-user/CloudShirt
             git clone https://github.com/looking4ward/CloudShirt.git .
@@ -75,6 +76,7 @@ Resources:
             yum install -y dotnet-sdk-6.0 git
 
             # --- Clone CloudShirt naar de juiste map ---
+            cd /home/ec2-user/
             mkdir -p CloudShirt
             cd /home/ec2-user/CloudShirt
             git clone https://github.com/looking4ward/CloudShirt.git .
