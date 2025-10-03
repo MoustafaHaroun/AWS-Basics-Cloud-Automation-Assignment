@@ -46,7 +46,7 @@ Resources:
 
             # --- Start de webapp met nohup ---
             cd /home/ec2-user/CloudShirt/release
-            nohup dotnet Web.dll > web.log 2>&1 &
+            nohup dotnet Web.dll --urls "http://0.0.0.0:5000" > web.log 2>&1 &
           - RDSENDPOINT: !ImportValue rdsEndpointAddress
       Tags:
         - Key: Stack
@@ -89,7 +89,7 @@ Resources:
 
             # --- Start de webapp met nohup ---
             cd /home/ec2-user/CloudShirt/release
-            nohup dotnet Web.dll > web.log 2>&1 &
+            nohup dotnet Web.dll --urls "http://0.0.0.0:5000" > web.log 2>&1 &
           - RDSENDPOINT: !ImportValue rdsEndpointAddress
       Tags:
         - Key: Stack
