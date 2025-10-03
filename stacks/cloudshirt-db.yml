@@ -1,33 +1,27 @@
 Description: CloudShirt Database + Security Groups
 
 Resources:
-
-# --- Security Groups ---
+  # --- Security Groups ---
 
   securityGroupInstance1:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow all outbound + inbound 5099, 44315 
+      GroupDescription: Allow all outbound + inbound 5099, 44315
       VpcId: !ImportValue vpc1Id
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 5099
-          ToPort: 5099
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 44315
-          ToPort: 44315
+          FromPort: 5000
+          ToPort: 5000
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
       Tags:
-        - Key: Stack 
+        - Key: Stack
           Value: cloudshirt-db
         - Key: Name
           Value: securityGroupInstance1
-
 
   securityGroupRds1:
     Type: AWS::EC2::SecurityGroup
@@ -40,7 +34,7 @@ Resources:
           ToPort: 1433
           SourceSecurityGroupId: !Ref securityGroupInstance1
       Tags:
-        - Key: Stack 
+        - Key: Stack
           Value: cloudshirt-db
         - Key: Name
           Value: securityGroupRds1
@@ -56,7 +50,7 @@ Resources:
         - !ImportValue privateSubnet2Id
       DBSubnetGroupName: rdsSubnetGroup1
       Tags:
-        - Key: Stack 
+        - Key: Stack
           Value: cloudshirt-db
         - Key: Name
           Value: rdsSubnetGroup1
@@ -65,7 +59,7 @@ Resources:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceIdentifier: db1
-      AllocatedStorage: 20
+      AllocatedStorage: 10
       DBInstanceClass: db.t3.small
       Engine: sqlserver-ex
       MasterUsername: csadmin
@@ -77,7 +71,7 @@ Resources:
       MonitoringInterval: 0
       LicenseModel: license-included
       Tags:
-        - Key: Stack 
+        - Key: Stack
           Value: cloudshirt-db
         - Key: Name
           Value: rds1
@@ -87,9 +81,9 @@ Resources:
 Outputs:
   securityGroupInstance1:
     Value: !Ref securityGroupInstance1
-    Export: 
+    Export:
       Name: securityGroupInstance1Id
- 
+
   rdsEndpoint:
     Value: !GetAtt rds1.Endpoint.Address
     Export:
