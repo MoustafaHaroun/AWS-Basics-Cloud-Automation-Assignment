@@ -41,6 +41,7 @@ Resources:
             sed -i 's/Server.*Identity;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
 
             # --- Build & publish .NET Web app ---
+            export DOTNET_CLI_HOME=/home/ec2-user
             cd /home/ec2-user/CloudShirt/src/Web
             dotnet publish -c Release -o /home/ec2-user/CloudShirt/release
 
@@ -84,6 +85,7 @@ Resources:
             sed -i 's/Server.*Identity;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
 
             # --- Build & publish .NET Web app ---
+            export DOTNET_CLI_HOME=/home/ec2-user
             cd /home/ec2-user/CloudShirt/src/Web
             dotnet publish -c Release -o /home/ec2-user/CloudShirt/release
 

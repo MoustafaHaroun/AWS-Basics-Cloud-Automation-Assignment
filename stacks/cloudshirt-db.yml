@@ -6,7 +6,7 @@ Resources:
   securityGroupInstance1:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow all outbound + inbound 5099, 44315
+      GroupDescription: Allow all outbound + inbound 5000, 22
       VpcId: !ImportValue vpc1Id
       SecurityGroupIngress:
         - IpProtocol: tcp
