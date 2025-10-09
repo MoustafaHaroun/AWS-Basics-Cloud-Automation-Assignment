@@ -151,8 +151,8 @@ Resources:
       DesiredCapacity: 3
       MinSize: 1
       MaxSize: 3
-      Recurrence: "0 9 * * *" # 09:00 Dutch time
-      TimeZone: "Europe/Amsterdam"
+      Recurrence: "0 18 * * *"  # Scale out at 6 PM ET
+      TimeZone: "America/New_York"
 
   scaleInSchedule1:
     Type: AWS::AutoScaling::ScheduledAction
@@ -161,5 +161,5 @@ Resources:
       DesiredCapacity: 1
       MinSize: 1
       MaxSize: 3
-      Recurrence: "0 1 * * *" # 01:00 Dutch time
-      TimeZone: "Europe/Amsterdam"
+      Recurrence: "0 20 * * *"  # Scale in at 8 PM ET
+      TimeZone: "America/New_York"
