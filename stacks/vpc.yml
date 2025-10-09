@@ -1,0 +1,277 @@
+Description: Multi-AZ VPC for CloudShirt application
+
+# --- Parameters ---
+
+Parameters:
+  vpcCidr1:
+    Description: Ip range of VPC
+    Type: String
+    Default: "10.0.0.0/16"
+
+  availabilityZone1:
+    Description: Please enter the name of the first Availability Zone
+    Type: String
+    Default: us-east-1a
+
+  availabilityZone2:
+    Description: Please enter the name of the second Availability Zone
+    Type: String
+    Default: us-east-1b
+
+  publicSubnet1Cidr:
+    Description: Ip range of subnet 1
+    Type: String
+    Default: "10.0.1.0/24"
+
+  privateSubnet1Cidr:
+    Description: Ip range of subnet 1
+    Type: String
+    Default: "10.0.51.0/24"
+
+  publicSubnet2Cidr:
+    Description: Ip range of subnet 1
+    Type: String
+    Default: "10.0.2.0/24"
+
+  privateSubnet2Cidr:
+    Description: Ip range of subnet 1
+    Type: String
+    Default: "10.0.52.0/24"
+
+Resources:
+  # --- VPC ---
+
+  vpc1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref vpcCidr1
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: name
+          Value: vpc1
+
+  internetGateway1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: name
+          Value: internetGateway1
+
+  gatewayAttachment1:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref internetGateway1
+      VpcId: !Ref vpc1
+
+  # --- Public Routing ---
+
+  publicRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc1
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: publicRouteTable1
+
+  publicRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref publicRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref internetGateway1
+
+  publicSubnet1RouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref publicRouteTable1
+      SubnetId: !Ref publicSubnet1
+
+  publicSubnet2RouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref publicRouteTable1
+      SubnetId: !Ref publicSubnet2
+
+  # --- NAT Gateways ---
+
+  eip1:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  natGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt eip1.AllocationId
+      SubnetId: !Ref publicSubnet1
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: natGateway1
+
+  eip2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  natGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt eip2.AllocationId
+      SubnetId: !Ref publicSubnet2
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: natGateway2
+
+  # --- Private Routing ---
+
+  privateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc1
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: privateRouteTable1
+
+  privateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref privateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref natGateway1
+
+  privateSubnet1RouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref privateRouteTable1
+      SubnetId: !Ref privateSubnet1
+
+  privateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc1
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: privateRouteTable2
+
+  privateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref privateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref natGateway2
+
+  privateSubnet2RouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref privateRouteTable2
+      SubnetId: !Ref privateSubnet2
+
+  # --- Subnets ---
+
+  publicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref availabilityZone1
+      VpcId: !Ref vpc1
+      CidrBlock: !Ref publicSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: publicSubnet1
+
+  privateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref availabilityZone1
+      VpcId: !Ref vpc1
+      CidrBlock: !Ref privateSubnet1Cidr
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: privateSubnet1
+
+  publicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref availabilityZone2
+      VpcId: !Ref vpc1
+      CidrBlock: !Ref publicSubnet2Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: publicSubnet2
+
+  privateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Ref availabilityZone2
+      VpcId: !Ref vpc1
+      CidrBlock: !Ref privateSubnet2Cidr
+      Tags:
+        - Key: Stack
+          Value: vpc
+        - Key: Name
+          Value: privateSubnet2
+
+# --- Outputs ---
+
+Outputs:
+  vpc1Id:
+    Value: !Ref vpc1
+    Export:
+      Name: vpc1
+
+  publicSubnet1:
+    Value: !Ref publicSubnet1
+    Export:
+      Name: publicSubnet1
+
+  publicSubnet2:
+    Value: !Ref publicSubnet2
+    Export:
+      Name: publicSubnet2
+
+  privateSubnet1:
+    Value: !Ref privateSubnet1
+    Export:
+      Name: privateSubnet1
+
+  privateSubnet2:
+    Value: !Ref privateSubnet2
+    Export:
+      Name: privateSubnet2
+
+  internetGateway1:
+    Value: !Ref internetGateway1
+    Export:
+      Name: internetGateway1
+
+  natGateway1:
+    Value: !Ref natGateway1
+    Export:
+      Name: natGateway1
+
+  natGateway2:
+    Value: !Ref natGateway2
+    Export:
+      Name: natGateway2

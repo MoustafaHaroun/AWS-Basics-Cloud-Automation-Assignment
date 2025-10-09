@@ -1,0 +1,117 @@
+Description: CloudShirt Database + Security Groups
+
+Resources:
+  # --- Security Groups ---
+
+  securityGroupLoadBalancer1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound 80 from internet
+      VpcId: !ImportValue vpc1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-db
+        - Key: Name
+          Value: securityGroupLoadBalancer1
+
+  securityGroupInstance1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all outbound + inbound 22, # 5000 from ELB only
+      VpcId: !ImportValue vpc1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0
+          # SourceSecurityGroupId: !Ref securityGroupLoadBalancer1
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-db
+        - Key: Name
+          Value: securityGroupInstance1
+
+  securityGroupRds1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all outbound + inbound 1433 from EC2 instances only
+      VpcId: !ImportValue vpc1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          SourceSecurityGroupId: !Ref securityGroupInstance1
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-db
+        - Key: Name
+          Value: securityGroupRds1
+
+    # --- RDS Database ---
+
+  rdsSubnetGroup1:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet for CloudShirt RDS
+      SubnetIds:
+        - !ImportValue privateSubnet1
+        - !ImportValue privateSubnet2
+      DBSubnetGroupName: rdsSubnetGroup1
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-db
+        - Key: Name
+          Value: rdsSubnetGroup1
+
+  rds1:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: db1
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.small
+      Engine: sqlserver-ex
+      MasterUsername: csadmin
+      MasterUserPassword: cspasswd
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref securityGroupRds1
+      DBSubnetGroupName: !Ref rdsSubnetGroup1
+      MonitoringInterval: 0
+      LicenseModel: license-included
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-db
+        - Key: Name
+          Value: rds1
+
+# --- Outputs ---
+
+Outputs:
+  securityGroupInstance1:
+    Value: !Ref securityGroupInstance1
+    Export:
+      Name: securityGroupInstance1
+
+  securityGroupRds1:
+    Value: !Ref securityGroupRds1
+    Export:
+      Name: securityGroupRds1
+
+  securityGroupLoadBalancer1:
+    Value: !Ref securityGroupLoadBalancer1
+    Export:
+      Name: securityGroupLoadBalancer1
+
+  rdsEndpoint1:
+    Value: !GetAtt rds1.Endpoint.Address
+    Export:
+      Name: rds1EndpointAddress
