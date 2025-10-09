@@ -101,7 +101,6 @@ Resources:
               KillSignal=SIGINT
               SyslogIdentifier=cloudshirt
               User=ec2-user
-              Environment=ASPNETCORE_ENVIRONMENT=Development
               Environment=DOTNET_CLI_HOME=/home/ec2-user
 
               [Install]
