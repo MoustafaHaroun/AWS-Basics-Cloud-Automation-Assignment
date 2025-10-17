@@ -15,228 +15,228 @@ Resources:
         - Key: Name
           Value: s3bucket1
 
-  # --- Lambda Security Group ---
-  securityGroupLambda:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Lambda export function
-      VpcId: !ImportValue vpc1
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Stack
-          Value: cloudshirt-s3
-        - Key: Name
-          Value: securityGroupLambda
+#   # --- Lambda Security Group ---
+#   securityGroupLambda:
+#     Type: AWS::EC2::SecurityGroup
+#     Properties:
+#       GroupDescription: Security group for Lambda export function
+#       VpcId: !ImportValue vpc1
+#       SecurityGroupEgress:
+#         - IpProtocol: -1
+#           CidrIp: 0.0.0.0/0
+#       Tags:
+#         - Key: Stack
+#           Value: cloudshirt-s3
+#         - Key: Name
+#           Value: securityGroupLambda
 
-  # --- Lambda Function ---
-  ExportLambda:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: CloudShirtExportLambda
-      Handler: index.lambda_handler
-      Role: arn:aws:iam::992382738670:role/LabRole
-      Runtime: python3.11
-      Timeout: 300
-      MemorySize: 512
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref securityGroupLambda
-        SubnetIds:
-          - !ImportValue privateSubnet1
-          - !ImportValue privateSubnet2
-      Code:
-        ZipFile: |
-          import boto3
-          import os
-          import csv
-          import socket
-          from datetime import datetime
+#   # --- Lambda Function ---
+#   ExportLambda:
+#     Type: AWS::Lambda::Function
+#     Properties:
+#       FunctionName: CloudShirtExportLambda
+#       Handler: index.lambda_handler
+#       Role: arn:aws:iam::992382738670:role/LabRole
+#       Runtime: python3.11
+#       Timeout: 300
+#       MemorySize: 512
+#       VpcConfig:
+#         SecurityGroupIds:
+#           - !Ref securityGroupLambda
+#         SubnetIds:
+#           - !ImportValue privateSubnet1
+#           - !ImportValue privateSubnet2
+#       Code:
+#         ZipFile: |
+#           import boto3
+#           import os
+#           import csv
+#           import socket
+#           from datetime import datetime
           
-          def lambda_handler(event, context):
-              """Export RDS order table to S3 using simple socket connection"""
+#           def lambda_handler(event, context):
+#               """Export RDS order table to S3 using simple socket connection"""
               
-              # Get environment variables
-              server = os.getenv("DB_HOST")
-              database = os.getenv("DB_NAME")
-              username = os.getenv("DB_USER")
-              password = os.getenv("DB_PASS")
-              s3_bucket = os.getenv("S3_BUCKET")
+#               # Get environment variables
+#               server = os.getenv("DB_HOST")
+#               database = os.getenv("DB_NAME")
+#               username = os.getenv("DB_USER")
+#               password = os.getenv("DB_PASS")
+#               s3_bucket = os.getenv("S3_BUCKET")
               
-              print(f"Starting export from {server}/{database}")
+#               print(f"Starting export from {server}/{database}")
               
-              try:
-                  # Test connectivity first
-                  print(f"Testing connection to {server}:1433")
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(5)
-                  result = sock.connect_ex((server, 1433))
-                  sock.close()
+#               try:
+#                   # Test connectivity first
+#                   print(f"Testing connection to {server}:1433")
+#                   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#                   sock.settimeout(5)
+#                   result = sock.connect_ex((server, 1433))
+#                   sock.close()
                   
-                  if result != 0:
-                      raise Exception(f"Cannot reach database server {server}:1433")
+#                   if result != 0:
+#                       raise Exception(f"Cannot reach database server {server}:1433")
                   
-                  print("Database server is reachable")
+#                   print("Database server is reachable")
                   
-                  # Try importing pymssql
-                  try:
-                      import pymssql
-                      print("Using pymssql connector")
+#                   # Try importing pymssql
+#                   try:
+#                       import pymssql
+#                       print("Using pymssql connector")
                       
-                      conn = pymssql.connect(
-                          server=server,
-                          user=username,
-                          password=password,
-                          database=database,
-                          timeout=15,
-                          login_timeout=10
-                      )
-                  except ImportError:
-                      print("pymssql not available, trying pyodbc")
-                      import pyodbc
+#                       conn = pymssql.connect(
+#                           server=server,
+#                           user=username,
+#                           password=password,
+#                           database=database,
+#                           timeout=15,
+#                           login_timeout=10
+#                       )
+#                   except ImportError:
+#                       print("pymssql not available, trying pyodbc")
+#                       import pyodbc
                       
-                      conn_str = (
-                          f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                          f"SERVER={server};"
-                          f"DATABASE={database};"
-                          f"UID={username};"
-                          f"PWD={password};"
-                          f"Encrypt=yes;"
-                          f"TrustServerCertificate=yes;"
-                      )
-                      conn = pyodbc.connect(conn_str, timeout=15)
+#                       conn_str = (
+#                           f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+#                           f"SERVER={server};"
+#                           f"DATABASE={database};"
+#                           f"UID={username};"
+#                           f"PWD={password};"
+#                           f"Encrypt=yes;"
+#                           f"TrustServerCertificate=yes;"
+#                       )
+#                       conn = pyodbc.connect(conn_str, timeout=15)
                   
-                  cursor = conn.cursor()
+#                   cursor = conn.cursor()
                   
-                  # Query the order table
-                  query = "SELECT * FROM [dbo].[order]"
-                  print(f"Executing: {query}")
-                  cursor.execute(query)
+#                   # Query the order table
+#                   query = "SELECT * FROM [dbo].[order]"
+#                   print(f"Executing: {query}")
+#                   cursor.execute(query)
                   
-                  # Get column names
-                  columns = [desc[0] for desc in cursor.description]
-                  print(f"Columns: {', '.join(columns)}")
+#                   # Get column names
+#                   columns = [desc[0] for desc in cursor.description]
+#                   print(f"Columns: {', '.join(columns)}")
                   
-                  # Fetch all rows
-                  rows = cursor.fetchall()
-                  row_count = len(rows)
-                  print(f"Fetched {row_count} rows")
+#                   # Fetch all rows
+#                   rows = cursor.fetchall()
+#                   row_count = len(rows)
+#                   print(f"Fetched {row_count} rows")
                   
-                  if row_count == 0:
-                      print("WARNING: No data found in order table")
+#                   if row_count == 0:
+#                       print("WARNING: No data found in order table")
                   
-                  # Write to CSV
-                  timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                  csv_filename = f"orders_{timestamp}.csv"
-                  csv_path = f"/tmp/{csv_filename}"
+#                   # Write to CSV
+#                   timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+#                   csv_filename = f"orders_{timestamp}.csv"
+#                   csv_path = f"/tmp/{csv_filename}"
                   
-                  with open(csv_path, "w", newline='', encoding='utf-8') as f:
-                      writer = csv.writer(f)
-                      writer.writerow(columns)
-                      writer.writerows(rows)
+#                   with open(csv_path, "w", newline='', encoding='utf-8') as f:
+#                       writer = csv.writer(f)
+#                       writer.writerow(columns)
+#                       writer.writerows(rows)
                   
-                  print(f"CSV created: {csv_path}")
+#                   print(f"CSV created: {csv_path}")
                   
-                  # Upload to S3
-                  s3_client = boto3.client("s3")
-                  s3_key = f"exports/{csv_filename}"
+#                   # Upload to S3
+#                   s3_client = boto3.client("s3")
+#                   s3_key = f"exports/{csv_filename}"
                   
-                  s3_client.upload_file(
-                      csv_path,
-                      s3_bucket,
-                      s3_key,
-                      ExtraArgs={'ContentType': 'text/csv'}
-                  )
+#                   s3_client.upload_file(
+#                       csv_path,
+#                       s3_bucket,
+#                       s3_key,
+#                       ExtraArgs={'ContentType': 'text/csv'}
+#                   )
                   
-                  print(f"✓ Uploaded to s3://{s3_bucket}/{s3_key}")
+#                   print(f"✓ Uploaded to s3://{s3_bucket}/{s3_key}")
                   
-                  # Cleanup
-                  cursor.close()
-                  conn.close()
-                  os.remove(csv_path)
+#                   # Cleanup
+#                   cursor.close()
+#                   conn.close()
+#                   os.remove(csv_path)
                   
-                  return {
-                      "statusCode": 200,
-                      "body": {
-                          "status": "success",
-                          "rows_exported": row_count,
-                          "s3_location": f"s3://{s3_bucket}/{s3_key}",
-                          "timestamp": timestamp,
-                          "columns": columns
-                      }
-                  }
+#                   return {
+#                       "statusCode": 200,
+#                       "body": {
+#                           "status": "success",
+#                           "rows_exported": row_count,
+#                           "s3_location": f"s3://{s3_bucket}/{s3_key}",
+#                           "timestamp": timestamp,
+#                           "columns": columns
+#                       }
+#                   }
                   
-              except Exception as e:
-                  error_msg = str(e)
-                  print(f"ERROR: {error_msg}")
+#               except Exception as e:
+#                   error_msg = str(e)
+#                   print(f"ERROR: {error_msg}")
                   
-                  import traceback
-                  traceback.print_exc()
+#                   import traceback
+#                   traceback.print_exc()
                   
-                  return {
-                      "statusCode": 500,
-                      "body": {
-                          "status": "error",
-                          "message": error_msg,
-                          "server": server
-                      }
-                  }
-      Environment:
-        Variables:
-          S3_BUCKET: !Ref s3bucket1
-          DB_HOST: !ImportValue rds1EndpointAddress
-          DB_NAME: "cloudshirtdb"
-          DB_USER: "csadmin"
-          DB_PASS: "cspasswd"
+#                   return {
+#                       "statusCode": 500,
+#                       "body": {
+#                           "status": "error",
+#                           "message": error_msg,
+#                           "server": server
+#                       }
+#                   }
+#       Environment:
+#         Variables:
+#           S3_BUCKET: !Ref s3bucket1
+#           DB_HOST: !ImportValue rds1EndpointAddress
+#           DB_NAME: "cloudshirtdb"
+#           DB_USER: "csadmin"
+#           DB_PASS: "cspasswd"
 
-  # --- EventBridge Rule for Scheduled Export ---
-  ExportScheduleRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: CloudShirtDailyExport
-      Description: Trigger Lambda export daily at 2 AM UTC
-      ScheduleExpression: "cron(0 2 * * ? *)"
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt ExportLambda.Arn
-          Id: ExportLambdaTarget
+#   # --- EventBridge Rule for Scheduled Export ---
+#   ExportScheduleRule:
+#     Type: AWS::Events::Rule
+#     Properties:
+#       Name: CloudShirtDailyExport
+#       Description: Trigger Lambda export daily at 2 AM UTC
+#       ScheduleExpression: "cron(0 2 * * ? *)"
+#       State: ENABLED
+#       Targets:
+#         - Arn: !GetAtt ExportLambda.Arn
+#           Id: ExportLambdaTarget
 
-  # --- Lambda Permission for EventBridge ---
-  ExportLambdaInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref ExportLambda
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt ExportScheduleRule.Arn
+#   # --- Lambda Permission for EventBridge ---
+#   ExportLambdaInvokePermission:
+#     Type: AWS::Lambda::Permission
+#     Properties:
+#       FunctionName: !Ref ExportLambda
+#       Action: lambda:InvokeFunction
+#       Principal: events.amazonaws.com
+#       SourceArn: !GetAtt ExportScheduleRule.Arn
 
-# --- Outputs ---
-Outputs:
-  BucketName:
-    Description: S3 bucket name for exports
-    Value: !Ref s3bucket1
-    Export:
-      Name: ExportBucketName
+# # --- Outputs ---
+# Outputs:
+#   BucketName:
+#     Description: S3 bucket name for exports
+#     Value: !Ref s3bucket1
+#     Export:
+#       Name: ExportBucketName
   
-  LambdaFunctionName:
-    Description: Lambda function name
-    Value: !Ref ExportLambda
-    Export:
-      Name: ExportLambdaFunction
+#   LambdaFunctionName:
+#     Description: Lambda function name
+#     Value: !Ref ExportLambda
+#     Export:
+#       Name: ExportLambdaFunction
   
-  LambdaFunctionArn:
-    Description: Lambda function ARN
-    Value: !GetAtt ExportLambda.Arn
-    Export:
-      Name: ExportLambdaArn
+#   LambdaFunctionArn:
+#     Description: Lambda function ARN
+#     Value: !GetAtt ExportLambda.Arn
+#     Export:
+#       Name: ExportLambdaArn
   
-  LambdaSecurityGroup:
-    Description: Lambda security group ID
-    Value: !Ref securityGroupLambda
-    Export:
-      Name: securityGroupLambda
+#   LambdaSecurityGroup:
+#     Description: Lambda security group ID
+#     Value: !Ref securityGroupLambda
+#     Export:
+#       Name: securityGroupLambda
   
-  TestCommand:
-    Description: Command to test the Lambda function
-    Value: !Sub 'aws lambda invoke --function-name ${ExportLambda} response.json && cat response.json'
+#   TestCommand:
+#     Description: Command to test the Lambda function
+#     Value: !Sub 'aws lambda invoke --function-name ${ExportLambda} response.json && cat response.json'
