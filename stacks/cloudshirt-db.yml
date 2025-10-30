@@ -1,4 +1,4 @@
-Description: CloudShirt Database + Security Groups
+Description: CloudShirt database + Security groups
 
 Resources:
   # --- Security Groups ---

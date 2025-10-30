@@ -1,4 +1,4 @@
-Description: Application load balancer for CloudShirt
+Description: Elastic load balancer + CloudShirt instances
 
 Parameters:
   KeyName:
@@ -64,9 +64,38 @@ Resources:
               # --- Update OS en dependencies ---
               yum update -y
 
-              # --- Installeer Git en .NET 6 SDK ---
+              # --- Installeer Git, .NET 6 SDK en EFS utilities ---
               rpm -Uvh https://packages.microsoft.com/config/centos/8/packages-microsoft-prod.rpm
-              yum install -y dotnet-sdk-6.0 git
+              yum install -y dotnet-sdk-6.0 git amazon-efs-utils
+
+              # --- Mount EFS voor logging ---
+              mkdir -p /mnt/efs
+              mount -t efs -o tls ${EFSID}:/ /mnt/efs
+              echo "${EFSID}:/ /mnt/efs efs _netdev,tls 0 0" >> /etc/fstab
+
+              # --- Maak logs directory met juiste permissies ---
+              mkdir -p /mnt/efs/logs
+              chown -R ec2-user:ec2-user /mnt/efs/logs
+              chmod -R 755 /mnt/efs/logs
+
+              # --- Test write permissions ---
+              su - ec2-user -c "touch /mnt/efs/logs/test.log && rm /mnt/efs/logs/test.log"
+
+              # --- Setup log rotation ---
+              cat << 'LOGROTATE' > /etc/logrotate.d/cloudshirt
+              /mnt/efs/logs/cloudshirt.log {
+                  daily
+                  rotate 30
+                  compress
+                  missingok
+                  notifempty
+                  copytruncate
+                  su ec2-user ec2-user
+              }
+              LOGROTATE
+
+              # --- Ensure logrotate runs daily ---
+              chmod 644 /etc/logrotate.d/cloudshirt
 
               # --- Clone CloudShirt naar de juiste map ---
               su - ec2-user -c "
@@ -95,13 +124,14 @@ Resources:
 
               [Service]
               WorkingDirectory=/home/ec2-user/CloudShirt/release
-              ExecStart=/usr/bin/dotnet /home/ec2-user/CloudShirt/release/Web.dll --urls "http://0.0.0.0:5000"
+              ExecStart=/bin/bash -c '/usr/bin/dotnet /home/ec2-user/CloudShirt/release/Web.dll --urls "http://0.0.0.0:5000" 2>&1 | tee -a /mnt/efs/logs/cloudshirt.log'
               Restart=always
               RestartSec=10
               KillSignal=SIGINT
               SyslogIdentifier=cloudshirt
               User=ec2-user
               Environment=DOTNET_CLI_HOME=/home/ec2-user
+              Environment=ASPNETCORE_ENVIRONMENT=Production
 
               [Install]
               WantedBy=multi-user.target
@@ -112,6 +142,7 @@ Resources:
               systemctl enable cloudshirt.service
               systemctl start cloudshirt.service
             - RDSENDPOINT: !ImportValue rds1EndpointAddress
+              EFSID: !ImportValue efs1
         TagSpecifications:
           - ResourceType: instance
             Tags:
@@ -150,7 +181,7 @@ Resources:
       DesiredCapacity: 3
       MinSize: 1
       MaxSize: 3
-      Recurrence: "0 18 * * *"  # Scale out at 6 PM ET
+      Recurrence: "0 18 * * *" # Scale out at 6 PM ET
       TimeZone: "America/New_York"
 
   scaleInSchedule1:
@@ -160,5 +191,14 @@ Resources:
       DesiredCapacity: 1
       MinSize: 1
       MaxSize: 3
-      Recurrence: "0 20 * * *"  # Scale in at 8 PM ET
+      Recurrence: "0 20 * * *" # Scale in at 8 PM ET
       TimeZone: "America/New_York"
+
+# --- Outputs ---
+
+Outputs:
+  loadbalancer1Dns:
+    Description: DNS name of the Load Balancer
+    Value: !GetAtt loadBalancer1.DNSName
+    Export:
+      Name: loadBalancer1Dns

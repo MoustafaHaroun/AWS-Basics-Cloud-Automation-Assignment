@@ -1,0 +1,269 @@
+Description: CloudShirt S3 bucket + Lambda export function (Compatible w/ LabRole)
+
+Resources:
+  # --- S3 Bucket voor log archivering ---
+
+  logArchiveBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cloudshirt-logs-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 365
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Purpose
+          Value: LogArchive
+
+  # --- IAM User 'Athena' met toegang tot alleen deze bucket ---
+
+  athenaUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: Athena
+      Tags:
+        - Key: Purpose
+          Value: LogBucketAccess
+
+  athenaUserAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref athenaUser
+
+  athenaUserPolicy:
+    Type: AWS::IAM::UserPolicy
+    Properties:
+      UserName: !Ref athenaUser
+      PolicyName: AthenaS3BucketAccess
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ListBucket
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource: !GetAtt logArchiveBucket.Arn
+          - Sid: ObjectAccess
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: !Sub "${logArchiveBucket.Arn}/*"
+
+  # --- Lambda Execution Role ---
+
+  lambdaLogExportRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaLogExportRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonElasticFileSystemClientReadWriteAccess
+      Policies:
+        - PolicyName: S3WriteAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: !Sub "${logArchiveBucket.Arn}/*"
+        - PolicyName: EC2NetworkAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+
+  # --- Lambda Function voor log export ---
+
+  logExportFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CloudShirtLogExport
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt lambdaLogExportRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref logArchiveBucket
+          EFS_MOUNT_PATH: /mnt/efs/logs
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue securityGroupInstance1
+        SubnetIds:
+          - !ImportValue publicSubnet1
+          - !ImportValue publicSubnet2
+      FileSystemConfigs:
+        - Arn: !Sub
+            - "arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/${AccessPointId}"
+            - AccessPointId: !Ref efsAccessPoint
+          LocalMountPath: /mnt/efs
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          import datetime
+          from pathlib import Path
+
+          s3 = boto3.client('s3')
+
+          def lambda_handler(event, context):
+              bucket_name = os.environ['S3_BUCKET']
+              efs_path = os.environ['EFS_MOUNT_PATH']
+              
+              # Datum voor archief naam
+              today = datetime.datetime.now()
+              date_prefix = today.strftime('%Y/%m/%d')
+              
+              archived_files = []
+              errors = []
+              
+              try:
+                  # Check of EFS path bestaat
+                  if not os.path.exists(efs_path):
+                      return {
+                          'statusCode': 404,
+                          'body': f'EFS path not found: {efs_path}'
+                      }
+                  
+                  # Loop door alle log files
+                  for log_file in Path(efs_path).glob('*.log*'):
+                      try:
+                          # S3 key met datum structuur
+                          s3_key = f'{date_prefix}/{log_file.name}'
+                          
+                          # Upload naar S3
+                          s3.upload_file(
+                              str(log_file),
+                              bucket_name,
+                              s3_key,
+                              ExtraArgs={
+                                  'StorageClass': 'STANDARD_IA',
+                                  'ServerSideEncryption': 'AES256'
+                              }
+                          )
+                          
+                          archived_files.append(s3_key)
+                          print(f'Archived: {log_file.name} -> s3://{bucket_name}/{s3_key}')
+                          
+                      except Exception as e:
+                          error_msg = f'Error archiving {log_file.name}: {str(e)}'
+                          errors.append(error_msg)
+                          print(error_msg)
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': {
+                          'archived_files': archived_files,
+                          'total_archived': len(archived_files),
+                          'errors': errors
+                      }
+                  }
+                  
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': f'Fatal error: {str(e)}'
+                  }
+
+  # --- EFS Access Point voor Lambda ---
+
+  efsAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !ImportValue efs1
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        Path: /logs
+        CreationInfo:
+          OwnerUid: "1000"
+          OwnerGid: "1000"
+          Permissions: "755"
+      Tags:
+        - Key: Name
+          Value: CloudShirtLogsAccessPoint
+
+  # --- EventBridge Rule voor dagelijkse trigger om 1:00 ---
+
+  dailyLogExportRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: DailyLogExport
+      Description: Trigger log export to S3 daily at 1:00 AM
+      ScheduleExpression: "cron(0 1 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt logExportFunction.Arn
+          Id: LogExportLambda
+
+  # --- Lambda Permission voor EventBridge ---
+
+  lambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref logExportFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt dailyLogExportRule.Arn
+
+# --- Outputs ---
+
+Outputs:
+  logArchiveBucketName:
+    Description: S3 bucket voor log archivering
+    Value: !Ref logArchiveBucket
+    Export:
+      Name: logArchiveBucketName
+
+  athenaUserAccessKeyId:
+    Description: Access Key ID voor Athena user
+    Value: !Ref athenaUserAccessKey
+
+  athenaUserSecretAccessKey:
+    Description: Secret Access Key voor Athena user (BEWAAR VEILIG!)
+    Value: !GetAtt athenaUserAccessKey.SecretAccessKey
+
+  logExportFunctionArn:
+    Description: ARN van de Lambda functie
+    Value: !GetAtt logExportFunction.Arn
+    Export:
+      Name: logExportFunctionArn
+
+  dailyExportSchedule:
+    Description: Dagelijkse export schedule
+    Value: "Daily at 1:00 AM UTC"
