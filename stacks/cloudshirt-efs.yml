@@ -58,9 +58,3 @@ Outputs:
     Value: !Ref efs1
     Export:
       Name: efs1
-
-  efs1Dns:
-    Description: DNS name of the EFS File System
-    Value: !GetAtt efs1.FileSystemId
-    Export:
-      Name: efs1Dns

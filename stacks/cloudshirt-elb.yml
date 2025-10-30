@@ -50,7 +50,7 @@ Resources:
     Properties:
       LaunchTemplateName: cloudShirtLaunchTemplate
       LaunchTemplateData:
-        ImageId: ami-0e95a5e2743ec9ec9
+        ImageId: ami-0bdd88bd06d16ba03
         InstanceType: t3.small
         KeyName: !Ref KeyName
         SecurityGroupIds:
@@ -61,88 +61,60 @@ Resources:
               #!/bin/bash
               set -eux
 
-              # --- Update OS en dependencies ---
+              # Software installeren
               yum update -y
-
-              # --- Installeer Git, .NET 6 SDK en EFS utilities ---
               rpm -Uvh https://packages.microsoft.com/config/centos/8/packages-microsoft-prod.rpm
               yum install -y dotnet-sdk-6.0 git amazon-efs-utils
 
-              # --- Mount EFS voor logging ---
+              # EFS mounten
               mkdir -p /mnt/efs
-              mount -t efs -o tls ${EFSID}:/ /mnt/efs
-              echo "${EFSID}:/ /mnt/efs efs _netdev,tls 0 0" >> /etc/fstab
-
-              # --- Maak logs directory met juiste permissies ---
+              mount -t efs ${EFS}:/ /mnt/efs
+              echo "${EFS}:/ /mnt/efs efs defaults 0 0" >> /etc/fstab
               mkdir -p /mnt/efs/logs
-              chown -R ec2-user:ec2-user /mnt/efs/logs
-              chmod -R 755 /mnt/efs/logs
+              chown ec2-user:ec2-user /mnt/efs/logs
 
-              # --- Test write permissions ---
-              su - ec2-user -c "touch /mnt/efs/logs/test.log && rm /mnt/efs/logs/test.log"
+              # CloudShirt ophalen
+              cd /home/ec2-user
+              git clone https://github.com/looking4ward/CloudShirt.git
 
-              # --- Setup log rotation ---
-              cat << 'LOGROTATE' > /etc/logrotate.d/cloudshirt
-              /mnt/efs/logs/cloudshirt.log {
-                  daily
-                  rotate 30
-                  compress
-                  missingok
-                  notifempty
-                  copytruncate
-                  su ec2-user ec2-user
-              }
-              LOGROTATE
+              # Database connecties configureren
+              sed -i 's|Server.*CatalogDb;|Server=${RDS},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;|' CloudShirt/src/Web/appsettings.json
+              sed -i 's|Server.*Identity;|Server=${RDS},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;|' CloudShirt/src/Web/appsettings.json
 
-              # --- Ensure logrotate runs daily ---
-              chmod 644 /etc/logrotate.d/cloudshirt
+              # Ownership aan ec2-user geven
+              chown -R ec2-user:ec2-user /home/ec2-user/CloudShirt
 
-              # --- Clone CloudShirt naar de juiste map ---
-              su - ec2-user -c "
-                mkdir -p ~/CloudShirt
-                cd ~/CloudShirt
-                git clone https://github.com/looking4ward/CloudShirt.git .
-              "
-
-              # --- Pas appsettings.json aan met RDS endpoint ---
-              sed -i 's/Server.*CatalogDb;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
-              sed -i 's/Server.*Identity;/Server=${RDSENDPOINT},1433;User ID=csadmin;Password=cspasswd;Initial Catalog=Microsoft.eShopOnWeb.Identity;/' /home/ec2-user/CloudShirt/src/Web/appsettings.json
-
-              # --- Build & publish .NET Web app ---
+              # App builden als ec2-user
               su - ec2-user -c "
                 export DOTNET_CLI_HOME=/home/ec2-user
-                export ASPNETCORE_ENVIRONMENT=Development
-                cd ~/CloudShirt/src/Web
-                dotnet publish -c Release -o ~/CloudShirt/release
+                cd /home/ec2-user/CloudShirt/src/Web
+                dotnet publish -c Release -o /home/ec2-user/CloudShirt/release
               "
 
-              # --- Maak een systemd service ---
-              cat << 'EOF' > /etc/systemd/system/cloudshirt.service
+              # Systemd service aanmaken
+              cat > /etc/systemd/system/cloudshirt.service << 'EOF'
               [Unit]
-              Description=CloudShirt Web Application
               After=network.target
 
               [Service]
               WorkingDirectory=/home/ec2-user/CloudShirt/release
-              ExecStart=/bin/bash -c '/usr/bin/dotnet /home/ec2-user/CloudShirt/release/Web.dll --urls "http://0.0.0.0:5000" 2>&1 | tee -a /mnt/efs/logs/cloudshirt.log'
+              ExecStart=/usr/bin/dotnet Web.dll --urls http://0.0.0.0:5000
               Restart=always
-              RestartSec=10
-              KillSignal=SIGINT
-              SyslogIdentifier=cloudshirt
               User=ec2-user
-              Environment=DOTNET_CLI_HOME=/home/ec2-user
               Environment=ASPNETCORE_ENVIRONMENT=Production
+              StandardOutput=append:/mnt/efs/logs/cloudshirt.log
+              StandardError=append:/mnt/efs/logs/cloudshirt.log
 
               [Install]
               WantedBy=multi-user.target
               EOF
 
-              # --- Service activeren ---
+              # Service starten
               systemctl daemon-reload
               systemctl enable cloudshirt.service
               systemctl start cloudshirt.service
-            - RDSENDPOINT: !ImportValue rds1EndpointAddress
-              EFSID: !ImportValue efs1
+            - RDS: !ImportValue rds1Endpoint
+              EFS: !ImportValue efs1
         TagSpecifications:
           - ResourceType: instance
             Tags:

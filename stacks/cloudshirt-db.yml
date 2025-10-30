@@ -114,4 +114,4 @@ Outputs:
   rdsEndpoint1:
     Value: !GetAtt rds1.Endpoint.Address
     Export:
-      Name: rds1EndpointAddress
+      Name: rds1Endpoint
