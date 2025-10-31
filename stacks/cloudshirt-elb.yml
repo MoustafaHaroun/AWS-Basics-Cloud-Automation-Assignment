@@ -66,6 +66,10 @@ Resources:
               rpm -Uvh https://packages.microsoft.com/config/centos/8/packages-microsoft-prod.rpm
               yum install -y dotnet-sdk-6.0 git amazon-efs-utils
 
+              # Filebeat 
+              curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-9.2.0-x86_64.rpm
+              rpm -vi filebeat-9.2.0-x86_64.rpm
+
               # EFS mounten
               mkdir -p /mnt/efs
               mount -t efs ${EFS}:/ /mnt/efs
@@ -109,12 +113,29 @@ Resources:
               WantedBy=multi-user.target
               EOF
 
+              # Filebeat configureren
+              cat > /etc/filebeat/filebeat.yml <<EOF
+              filebeat.inputs:
+                - type: filestream 
+                  enabled: true
+                  id: efs-logs
+                  paths:
+                    - /mnt/efs/logs/*.log
+
+              output.logstash:
+                hosts: ["${ELK_PUBLIC_IP}:5044"]
+              EOF
+
               # Service starten
               systemctl daemon-reload
               systemctl enable cloudshirt.service
               systemctl start cloudshirt.service
+
+              systemctl enable filebeat
+              systemctl start filebeat
             - RDS: !ImportValue rds1Endpoint
               EFS: !ImportValue efs1
+              ELK_PUBLIC_IP: !ImportValue ELKPublicIP
         TagSpecifications:
           - ResourceType: instance
             Tags:
