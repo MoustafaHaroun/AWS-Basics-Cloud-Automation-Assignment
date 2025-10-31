@@ -52,7 +52,7 @@ echo "ℹ Exporting Orders table from $DB_SERVER..."
 
 # --- Upload naar S3 ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-S3_KEY="orders_$TIMESTAMP.csv"
+S3_KEY="orders/orders_$TIMESTAMP.csv"
 
 echo "ℹ Uploading $EXPORT_FILE to s3://$S3_BUCKET/$S3_KEY..."
 aws s3 cp "$EXPORT_FILE" "s3://$S3_BUCKET/$S3_KEY"
