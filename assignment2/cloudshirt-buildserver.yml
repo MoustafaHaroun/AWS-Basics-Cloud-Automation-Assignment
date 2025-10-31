@@ -1,0 +1,244 @@
+Description: CloudShirt Build server + Docker Swarm master
+
+# --- Parameters ---
+
+Parameters:
+  keyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: vockey
+
+  dbUsername:
+    Type: String
+    Default: csadmin
+    Description: Database username for RDS connection
+
+  dbPassword:
+    Type: String
+    Default: cspasswd
+    NoEcho: true
+    Description: Database password for RDS connection
+
+Resources:
+  # --- Security Groups ---
+
+  securityGroupBuildServer1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH for build server
+      VpcId: !ImportValue vpc1
+      SecurityGroupIngress:
+        # SSH
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-buildserver
+        - Key: Name
+          Value: securityGroupBuildServer1
+
+  securityGroupSwarm1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Docker Swarm cluster communication
+      VpcId: !ImportValue vpc1
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-buildserver
+        - Key: Name
+          Value: securityGroupSwarm1
+
+  # Self-referencing rules voor Swarm communicatie
+  securityGroupSwarm1ClusterManagement:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref securityGroupSwarm1
+      IpProtocol: tcp
+      FromPort: 2377
+      ToPort: 2377
+      SourceSecurityGroupId: !Ref securityGroupSwarm1
+
+  securityGroupSwarm1NodeCommunicationTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref securityGroupSwarm1
+      IpProtocol: tcp
+      FromPort: 7946
+      ToPort: 7946
+      SourceSecurityGroupId: !Ref securityGroupSwarm1
+
+  securityGroupSwarm1NodeCommunicationUDP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref securityGroupSwarm1
+      IpProtocol: udp
+      FromPort: 7946
+      ToPort: 7946
+      SourceSecurityGroupId: !Ref securityGroupSwarm1
+
+  securityGroupSwarm1OverlayNetwork:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref securityGroupSwarm1
+      IpProtocol: udp
+      FromPort: 4789
+      ToPort: 4789
+      SourceSecurityGroupId: !Ref securityGroupSwarm1
+
+  # --- Build Server Instance ---
+
+  buildServer1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.small
+      KeyName: !Ref keyName
+      ImageId: ami-0bdd88bd06d16ba03
+      SubnetId: !ImportValue privateSubnet2
+      SecurityGroupIds:
+        - !Ref securityGroupBuildServer1
+        - !Ref securityGroupSwarm1
+      IamInstanceProfile: LabInstanceProfile
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-buildserver
+        - Key: Name
+          Value: buildServer1
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -eux
+            exec > /var/log/userdata.log 2>&1
+
+            # Software installeren
+            yum update -y
+            yum install cronie git -y
+
+            # Crond starten voor cron jobs
+            systemctl enable crond
+            systemctl start crond
+
+            # Install Docker + Compose + Buildx
+            dnf update -y
+            dnf install -y dnf-plugins-core
+            dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+            sed -i 's/\$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+            dnf install -y docker-ce docker-ce-cli containerd.io \
+              docker-buildx-plugin docker-compose-plugin
+
+            # Docker starten
+            systemctl enable docker
+            systemctl start docker
+
+            # ec2-user toevoegen aan docker groep
+            usermod -a -G docker ec2-user
+
+            # Docker Swarm initialiseren als manager
+            # Get private IP with IMDSv2 token
+            TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+            PRIVATE_IP=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/local-ipv4)
+            docker swarm init --advertise-addr $PRIVATE_IP
+
+            # Swarm join token naar S3 uploaden
+            docker swarm join-token -q worker > /tmp/swarm-token.txt
+            aws s3 cp /tmp/swarm-token.txt s3://${S3}/docker/swarm-token.txt
+
+            # CloudShirt repo clonen
+            cd /home/ec2-user
+            git clone https://github.com/looking4ward/CloudShirt.git
+            chown -R ec2-user:ec2-user CloudShirt
+
+            # Nightly build script maken
+            cat > /home/ec2-user/build-cloudshirt.sh << 'BUILDSCRIPT'
+            #!/bin/bash
+            set -eux
+
+            # ECR login
+            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR}
+
+            # Git pull latest changes
+            cd /home/ec2-user/CloudShirt
+            git pull origin main
+
+            # Database connecties configureren
+            sed -i 's|Server.*CatalogDb;|Server=${RDS},1433;User ID=${DBUSERNAME};Password=${DBPASSWORD};Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;|' src/Web/appsettings.Docker.json
+            sed -i 's|Server.*Identity;|Server=${RDS},1433;User ID=${DBUSERNAME};Password=${DBPASSWORD};Initial Catalog=Microsoft.eShopOnWeb.Identity;|' src/Web/appsettings.Docker.json
+            sed -i 's|Server.*CatalogDb;|Server=${RDS},1433;User ID=${DBUSERNAME};Password=${DBPASSWORD};Initial Catalog=Microsoft.eShopOnWeb.CatalogDb;|' src/PublicApi/appsettings.Docker.json
+            sed -i 's|Server.*Identity;|Server=${RDS},1433;User ID=${DBUSERNAME};Password=${DBPASSWORD};Initial Catalog=Microsoft.eShopOnWeb.Identity;|' src/PublicApi/appsettings.Docker.json
+
+            # Docker Compose override voor logging naar EFS maken
+            cat > docker-compose.logging.yml << 'LOGCOMPOSE'
+            version: '3.4'
+
+            services:
+              eshopwebmvc:
+                logging:
+                  driver: "local"
+                volumes:
+                  - /mnt/efs/logs:/app/logs
+
+              eshoppublicapi:
+                logging:
+                  driver: "local"
+                volumes:
+                  - /mnt/efs/logs:/app/logs
+            LOGCOMPOSE
+
+            # Build Docker images met docker compose
+            docker compose build
+
+            # Tag de web image voor ECR (docker-compose maakt 'eshopwebmvc:latest')
+            docker tag eshopwebmvc:latest ${ECR}:latest
+            docker tag eshopwebmvc:latest ${ECR}:$(date +%Y%m%d-%H%M%S)
+
+            # Push naar ECR
+            docker push ${ECR}:latest
+            docker push ${ECR}:$(date +%Y%m%d-%H%M%S)
+            BUILDSCRIPT
+
+            # Vervang ECR placeholder in script
+            sed -i "s#${ECR}#${ECR}#g" /home/ec2-user/build-cloudshirt.sh
+
+            # Script executable maken en ownership geven aan ec2-user
+            chmod +x /home/ec2-user/build-cloudshirt.sh
+            chown ec2-user:ec2-user /home/ec2-user/build-cloudshirt.sh
+
+            # Cron job voor nightly build (00:00 UTC)
+            echo "0 0 * * * /home/ec2-user/build-cloudshirt.sh >> /var/log/cloudshirt-build.log 2>&1" | crontab -u ec2-user -
+
+            # Eerste build direct uitvoeren
+            su - ec2-user -c "/home/ec2-user/build-cloudshirt.sh" >> /var/log/cloudshirt-build.log 2>&1
+
+          - ECR: !ImportValue ecrRepository1Uri
+            S3: !ImportValue bucket1
+            RDS: !ImportValue rds1Endpoint
+            DBUSERNAME: !Ref dbUsername
+            DBPASSWORD: !Ref dbPassword
+
+# --- Outputs ---
+
+Outputs:
+  buildServer1PrivateIp:
+    Description: Private IP of the build server
+    Value: !GetAtt buildServer1.PrivateIp
+    Export:
+      Name: buildServer1PrivateIp
+
+  buildServer1Id:
+    Description: Instance ID of the build server
+    Value: !Ref buildServer1
+    Export:
+      Name: buildServer1
+
+  securityGroupBuildServer1:
+    Description: Security group of the build server
+    Value: !Ref securityGroupBuildServer1
+    Export:
+      Name: securityGroupBuildServer1
+
+  securityGroupSwarm1:
+    Description: Security group for Docker Swarm cluster
+    Value: !Ref securityGroupSwarm1
+    Export:
+      Name: securityGroupSwarm1
