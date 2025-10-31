@@ -1,4 +1,4 @@
-Description: CloudShirt ELK Stack (Development)
+Description: CloudShirt ELK Stack
 
 Parameters:
   KeyName:
@@ -53,12 +53,13 @@ Resources:
           Value: elkInstance1 
       UserData: !Base64 |
         #!/bin/bash
-        set -e
+        set -eux
         exec > /var/log/userdata.log 2>&1
 
-        yum install java-11 -y
+        # --- Install dependencies ---
+        yum install -y java-11 
 
-        # Add Elastic repo
+        # --- Add Elastic repo ---
         rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
 
         cat <<EOF > /etc/yum.repos.d/elasticsearch.repo
@@ -67,39 +68,75 @@ Resources:
         baseurl=https://artifacts.elastic.co/packages/8.x/yum
         gpgcheck=1
         gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
-        enabled=0
+        enabled=1
         autorefresh=1
         type=rpm-md
         EOF
 
+
         # Import GPG key
         sudo rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
 
-        # Update and refresh repo
         yum clean all
         yum makecache
 
-        # Install stack
-        yum install -y elasticsearch kibana logstash 
+        # --- Install Elasticsearch, Logstash, Kibana ---
+        yum install -y elasticsearch logstash kibana
 
-        # Basic single-node dev setup
-        echo 'server.host: "0.0.0.0"' >> /etc/kibana/kibana.yml
+        # --- Configure Elasticsearch ---
+        echo "network.host: 0.0.0.0" >> /etc/elasticsearch/elasticsearch.yml
+        echo "http.port: 9200" >> /etc/elasticsearch/elasticsearch.yml
+        echo "discovery.seed_hosts: []" >> /etc/elasticsearch/elasticsearch.yml
+        # echo "xpack.security.enabled: false" >> /etc/elasticsearch/elasticsearch.yml
 
         systemctl enable elasticsearch
         systemctl start elasticsearch
 
-        # Wait for Elasticsearch to be up
-        until curl -s http://localhost:9200 >/dev/null; do sleep 5; done
+        # --- Wait until Elasticsearch is ready ---
+        # until curl -s http://127.0.0.1:9200 >/dev/null || curl -s http://$(hostname -I | awk '{print $1}'):9200 >/dev/null; do
+        #   echo "Waiting for Elasticsearch..."
+        #   sleep 5
+        # done
+
+
+        # --- Configure Kibana ---
+        echo 'server.host: "0.0.0.0"' >> /etc/kibana/kibana.yml
+        echo 'elasticsearch.hosts: ["http://localhost:9200"]' >> /etc/kibana/kibana.yml
 
         systemctl enable kibana
         systemctl start kibana
 
+        # --- Configure Logstash for Filebeat input ---
+        mkdir -p /etc/logstash/conf.d
+
+        cat <<'EOF' > /etc/logstash/conf.d/02-beats-input.conf
+        input {
+          beats {
+            port => 5044
+          }
+        }
+
+        filter {
+          # Optionally parse logs here, for now we just pass them through
+        }
+
+        output {
+          elasticsearch {
+            hosts => ["http://localhost:9200"]
+            index => "cloudshirt-%{+YYYY.MM.dd}"
+          }
+        }
+        EOF
+
         systemctl enable logstash
         systemctl start logstash
+
 Outputs:
   ELKPublicIP:
     Description: Public IP to access ELK instance
     Value: !GetAtt elkInstance1.PublicIp
+    Export:
+      Name: ELKPublicIP
 
   KibanaURL:
     Description: Kibana URL
