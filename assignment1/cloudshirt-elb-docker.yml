@@ -1,0 +1,201 @@
+Description: Elastic load balancer + CloudShirt Docker instances
+
+Parameters:
+  keyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: vockey
+
+Resources:
+  # --- Load Balancer ---
+
+  loadBalancer1:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: loadBalancer1
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        - !ImportValue publicSubnet1
+        - !ImportValue publicSubnet2
+      SecurityGroups:
+        - !ImportValue securityGroupLoadBalancer1
+
+  # --- Target Group ---
+
+  loadBalancer1TargetGroup1:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: loadBalancer1TargetGroup1
+      Port: 80
+      Protocol: HTTP
+      VpcId: !ImportValue vpc1
+      TargetType: instance
+
+  # --- Listener ---
+
+  loadbalancer1Listener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref loadBalancer1
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref loadBalancer1TargetGroup1
+
+  launchTemplate1:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: cloudShirtDockerLaunchTemplate
+      LaunchTemplateData:
+        ImageId: ami-0bdd88bd06d16ba03
+        InstanceType: t3.small
+        KeyName: !Ref keyName
+        IamInstanceProfile:
+          Name: LabInstanceProfile
+        SecurityGroupIds:
+          - !ImportValue securityGroupInstance1
+          - !ImportValue securityGroupSwarm1
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              set -eux
+              exec > /var/log/userdata.log 2>&1
+
+              # EFS utils installeren
+              yum install -y amazon-efs-utils
+
+              # EFS mounten
+              mkdir -p /mnt/efs
+              mount -t efs ${EFS}:/ /mnt/efs
+              echo "${EFS}:/ /mnt/efs efs defaults 0 0" >> /etc/fstab
+              mkdir -p /mnt/efs/logs
+              chown ec2-user:ec2-user /mnt/efs/logs
+
+              # Install Docker
+              dnf update -y
+              dnf install -y dnf-plugins-core
+              dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+              sed -i 's/\$releasever/9/g' /etc/yum.repos.d/docker-ce.repo
+              dnf install -y docker-ce docker-ce-cli containerd.io
+
+              # Docker starten
+              systemctl enable docker
+              systemctl start docker
+
+              # ec2-user toevoegen aan docker groep
+              usermod -a -G docker ec2-user
+
+              # Swarm token ophalen van S3
+              aws s3 cp s3://${S3}/docker/swarm-token.txt /tmp/swarm-token.txt
+
+              # Get Swarm manager private IP
+              MANAGER_IP=$(aws ec2 describe-instances \
+                --filters "Name=tag:Name,Values=buildServer1" "Name=instance-state-name,Values=running" \
+                --query "Reservations[0].Instances[0].PrivateIpAddress" \
+                --output text)
+
+              # Join Docker Swarm als worker
+              SWARM_TOKEN=$(cat /tmp/swarm-token.txt)
+              docker swarm join --token $SWARM_TOKEN ${MANAGER_IP}:2377
+
+              # ECR login
+              aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR}
+
+              # Pull CloudShirt image from ECR
+              docker pull ${ECR}:latest
+
+              # Run CloudShirt container met logging naar EFS
+              docker run -d \
+                --name cloudshirt \
+                --restart always \
+                -p 80:80 \
+                --log-driver local \
+                -v /mnt/efs/logs:/app/logs \
+                ${ECR}:latest
+
+              # Filebeat installeren, configureren en starten
+              curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-9.2.0-x86_64.rpm
+              rpm -vi filebeat-9.2.0-x86_64.rpm
+
+              # Filebeat configureren
+              cat > /etc/filebeat/filebeat.yml <<EOF
+              filebeat.inputs:
+                - type: filestream 
+                  enabled: true
+                  id: efs-logs
+                  paths:
+                    - /mnt/efs/logs/*.log
+
+              output.logstash:
+                hosts: ["${ELK}:5044"]
+              EOF
+
+              systemctl enable filebeat
+              systemctl start filebeat
+
+            - RDS: !ImportValue rds1Endpoint
+              EFS: !ImportValue efs1
+              ELK: !ImportValue ELKPublicIP
+              ECR: !ImportValue ecrRepository1Uri
+              S3: !ImportValue bucket1
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Stack
+                Value: cloudshirt-elb-docker
+
+  # --- Auto Scaling Group ---
+
+  autoScalingGroup1:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: autoScalingGroup1
+      VPCZoneIdentifier:
+        - !ImportValue publicSubnet1
+        - !ImportValue publicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref launchTemplate1
+        Version: !GetAtt launchTemplate1.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      TargetGroupARNs:
+        - !Ref loadBalancer1TargetGroup1
+      HealthCheckType: EC2
+      Tags:
+        - Key: Name
+          Value: cloudshirt-elb-docker
+          PropagateAtLaunch: true
+
+  # --- Scheduled Scaling ---
+
+  scaleOutSchedule1:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref autoScalingGroup1
+      DesiredCapacity: 3
+      MinSize: 1
+      MaxSize: 3
+      Recurrence: "0 18 * * *" # Scale out at 6 PM ET
+      TimeZone: "America/New_York"
+
+  scaleInSchedule1:
+    Type: AWS::AutoScaling::ScheduledAction
+    Properties:
+      AutoScalingGroupName: !Ref autoScalingGroup1
+      DesiredCapacity: 1
+      MinSize: 1
+      MaxSize: 3
+      Recurrence: "0 20 * * *" # Scale in at 8 PM ET
+      TimeZone: "America/New_York"
+
+# --- Outputs ---
+
+Outputs:
+  loadbalancer1Dns:
+    Description: DNS name of the Load Balancer
+    Value: !GetAtt loadBalancer1.DNSName
+    Export:
+      Name: loadBalancer1DockerDns
