@@ -1,0 +1,60 @@
+Description: EFS for CloudShirt logging
+
+Resources:
+  # --- EFS ---
+
+  efs1:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: efs1
+        - Key: Stack
+          Value: cloudshirt-efs
+
+  # --- Security Group ---
+
+  securityGroupEfs1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow NFS from EC2 instances
+      VpcId: !ImportValue vpc1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !ImportValue securityGroupInstance1
+      Tags:
+        - Key: Stack
+          Value: cloudshirt-efs
+        - Key: Name
+          Value: securityGroupEfs1
+
+  # --- Mount Targets in each AZ ---
+
+  mountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref efs1
+      SubnetId: !ImportValue publicSubnet1
+      SecurityGroups:
+        - !Ref securityGroupEfs1
+
+  mountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref efs1
+      SubnetId: !ImportValue publicSubnet2
+      SecurityGroups:
+        - !Ref securityGroupEfs1
+
+# --- Outputs ---
+
+Outputs:
+  efs1:
+    Description: ID of the EFS File System
+    Value: !Ref efs1
+    Export:
+      Name: efs1
